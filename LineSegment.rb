@@ -1,14 +1,16 @@
 #!/usr/bin/env ruby
-/*
+
+=begin
 Verifier:
-  AOJ CGL
   AOJ 1171 Laser Beam Reflections:
     reflection, cross point
   AOJ 1283 Most Distant Point from the Sea:
     incircle, polygon-point containment
   AOJ 2173 Wind Passages:
-    distance between line-segment
-*/
+    distance between line-segments
+  AOJ 2827 Industrial Convex Pillar City:
+    convex hull, distance between polygons, polygon-point containment
+=end
 
 PRECISION = 10
 
@@ -17,6 +19,10 @@ class Vector2D
     @x, @y = args
   end
   attr_reader :x, :y
+
+  def -@
+    Vector2D.new(-@x, -@y)
+  end
 
   def -(v)
     Vector2D.new(@x - v.x, @y - v.y)
@@ -85,8 +91,7 @@ class LineSegment
   def perpendicular_vector(point)
     u = @point2 - @point1
     v = point - @point1
-    t = u * (u.dot(v) / u.norm ** 2)
-    t - v
+    u * (u.dot(v) / u.norm ** 2) - v
   end
 
   def projection(point)
@@ -103,6 +108,24 @@ class LineSegment
     u.cross(v).round(PRECISION) == 0
   end
 
+  def intersect?(other)
+    v1 = @point2 - @point1
+    v2 = other.point1 - @point1
+    if parallel?(other)
+      return false if v1.cross(v2).round(PRECISION) != 0
+      return distance(other.point1).round(PRECISION) == 0 ||
+             distance(other.point2).round(PRECISION) == 0 ||
+             other.distance(@point1).round(PRECISION) == 0 ||
+             other.distance(@point2).round(PRECISION) == 0
+    end
+    v3 = other.point2 - @point1
+    v4 = other.point2 - other.point1
+    v5 = @point1 - other.point1
+    v6 = @point2 - other.point1
+    return (v1.cross(v2) * v1.cross(v3)).round(PRECISION) < 0 &&
+           (v4.cross(v5) * v4.cross(v6)).round(PRECISION) < 0
+  end
+
   def cross_point(other)
     u = @point2 - @point1
     v = other.point2 - other.point1
@@ -116,7 +139,7 @@ class LineSegment
       ip = u.dot(v)
       return (other - @point1).norm if ip <= 0
       return (other - @point2).norm if ip >= u.norm ** 2
-      return perpendicular_vector(other).norm
+      return u.cross(v).abs / u.norm
     elsif other.class == LineSegment
       return 0 if intersect?(other)
       return [
@@ -129,20 +152,63 @@ class LineSegment
       raise "unsupported class"
     end
   end
-
-  def intersect?(other)
-    if parallel?(other)
-      return distance(other.point1).round(PRECISION) == 0 ||
-             distance(other.point2).round(PRECISION) == 0 ||
-             other.distance(@point1).round(PRECISION) == 0 ||
-             other.distance(@point2).round(PRECISION) == 0
-    end
-    distance(cross_point(other)).round(PRECISION) == 0
-  end
 end
 
 def incircle_center(l1, l2, l3)
   u, v, w = l1.cross_point(l2), l2.cross_point(l3), l3.cross_point(l1)
   a, b, c = (w - v).norm, (u - w).norm, (v - u).norm
   (u * a + v * b + w * c) / (a + b + c)
+end
+
+def convex_hull_path(points, type)
+  raise "unknown type" if type != :upper && type != :lower
+  groups = points.group_by {|point| point.x }
+  selected = type == :upper ?
+    groups.map {|x, g| g.max_by(&:y) } :
+    groups.map {|x, g| g.min_by(&:y) }
+  sorted = selected.sort_by(&:x)
+
+  path = [sorted.shift]
+  until sorted.empty?
+    if path.size >= 2
+      p1 = path[-2]
+      p2 = path[-1]
+      p3 = sorted[0]
+      if ((p2 - p1).cross(p3 - p2) <=> 0) == (type == :upper ? 1 : -1)
+        path.pop
+        redo
+      end
+    end
+    path << sorted.shift
+  end
+  path
+end
+
+class Polygon
+  def initialize(points)
+    @lines = (points + [points[0]]).each_cons(2).map do |p1, p2|
+      LineSegment.new(p1, p2)
+    end
+  end
+  attr_reader :lines
+
+  def distance(other)
+    if other.class == Vector2D || other.class == LineSegment
+      return @lines.map {|l| l.distance(other) }.min
+    elsif other.class == Polygon
+      ret = other.lines.map {|l| distance(l) }.min
+    else
+      raise "unsupported class"
+    end
+  end
+
+  def contain?(point)
+    signs = []
+    lines.each do |l|
+      cps = (l.point2 - l.point1).cross(point - l.point1).round(PRECISION)
+      sign = (cps <=> 0)
+      signs << sign if sign != 0
+    end
+    signs.uniq.size <= 1
+  end
 end
